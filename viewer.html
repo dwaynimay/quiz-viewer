@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Penampil & Editor Soal (JSON ↔ HTML)</title>
+  <style>
+    :root{
+      --bg:#0b0f14; --card:#121922; --muted:#94a3b8; --text:#e6edf3; --accent:#60a5fa;
+      --ok:#22c55e; --warning:#f59e0b; --danger:#ef4444; --chip:#1f2937; --border:#1f2a37;
+    }
+    html,body{height:100%}
+    body{ margin:0; font-family:ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial;
+      background:linear-gradient(180deg, #0b0f14, #0c1117); color:var(--text); }
+    header{ position:sticky; top:0; z-index:10; backdrop-filter: blur(8px);
+      background:linear-gradient(180deg, rgba(12,17,23,.95), rgba(12,17,23,.7)); border-bottom:1px solid var(--border); }
+    .container{max-width:1100px;margin:0 auto;padding:18px 20px}
+    h1{font-size:20px;margin:0 0 6px 0}
+    .muted{color:var(--muted);font-size:13px}
+    .toolbar{ display:grid; grid-template-columns:1fr; gap:10px; margin-top:12px; }
+    @media(min-width:980px){
+      .toolbar{ grid-template-columns: 1fr auto auto auto auto auto auto; align-items:center } /* ✨ NEW: +2 tombol */
+    }
+    .btn{ display:inline-flex; align-items:center; gap:8px; padding:10px 12px; border:1px solid var(--border);
+      background:var(--card); color:var(--text); border-radius:10px; cursor:pointer; text-decoration:none; font-weight:600;
+      transition: transform .05s ease, box-shadow .2s ease, background .2s ease; user-select:none; }
+    .btn:hover{ box-shadow: 0 8px 20px rgba(2,6,23,.35) inset, 0 0 0 1px rgba(96,165,250,.15); }
+    .btn:active{ transform: translateY(1px); }
+    .btn.secondary{ background:#0f1720; }
+    .btn.ghost{ background:transparent; }
+    .switch{ display:inline-flex; align-items:center; gap:8px; font-size:14px; cursor:pointer; user-select:none; }
+    .switch input{ width:38px; height:22px; appearance:none; background:#111827; border:1px solid var(--border);
+      border-radius:999px; position:relative; outline:none; transition: background .2s ease; }
+    .switch input::after{ content:''; width:18px; height:18px; position:absolute; top:1px; left:1px; border-radius:50%; background:#334155; transition: left .2s ease, background .2s ease; }
+    .switch input:checked{ background:#12325b; }
+    .switch input:checked::after{ left:18px; background:#2563eb; }
+    .grid{ display:grid; gap:14px; grid-template-columns:1fr; }
+    @media(min-width:980px){ .grid{ grid-template-columns: 1fr 1fr } }
+    .card{ background: radial-gradient(200px 200px at 10% -10%, rgba(96,165,250,.08), transparent), var(--card);
+      border:1px solid var(--border); border-radius:14px; padding:14px; }
+    .qhead{display:flex; gap:10px; align-items:flex-start; justify-content:space-between}
+    .chip{ display:inline-flex; align-items:center; gap:8px; background: var(--chip); border:1px solid var(--border);
+      padding:4px 8px; border-radius:999px; font-size:12px; color:var(--muted); font-weight:600; }
+    .qtitle{ font-size:15px; line-height:1.35; margin:10px 0 8px 0; }
+    .options{ display:grid; gap:8px; }
+    .opt{ padding:8px 10px; border-radius:10px; border:1px solid var(--border); background:#0b1320;
+      display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:14px; user-select:none; }
+    .opt .k{font-weight:700; letter-spacing:.3px; opacity:.8}
+    .opt.selected{ border-color: rgba(34,197,94,.5); background:linear-gradient(180deg, rgba(34,197,94,.12), transparent); }
+    .opt .badge{ font-size:11px; padding:4px 7px; border-radius:999px; background:rgba(34,197,94,.15); color:#86efac; border:1px solid rgba(34,197,94,.35); font-weight:700; letter-spacing:.2px; }
+    .opt.clickable{ cursor:pointer; }
+    .meta{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    .searchbar{ display:flex; align-items:center; gap:8px; background:#0b1320; border:1px solid var(--border); border-radius:10px; padding:8px 10px; }
+    .searchbar input{ flex:1; background:transparent; color:var(--text); border:none; outline:none; font-size:14px; }
+    .count{ font-size:13px; color:var(--muted); margin-left:8px; }
+    footer{ color:var(--muted); text-align:center; padding:20px 0 28px 0 }
+    .sr-only{ position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden }
+    details{ margin-top:8px } summary{ cursor:pointer; color:var(--muted) }
+    .statusBar{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0 10px 0; }
+    .statusBar select, .statusBar .tinySel{ background:#0b1320; border:1px solid var(--border); color:var(--text); padding:6px 8px; border-radius:10px; }
+    .statusTag{ font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid var(--border); }
+    .tagUnknown{ background:#111827; color:var(--muted); }
+    .tagCorrect{ background:rgba(34,197,94,.15); color:#86efac; border-color:rgba(34,197,94,.35) }
+    .tagWrong{ background:rgba(239,68,68,.12); color:#fecaca; border-color:rgba(239,68,68,.35) }
+    .pill{ font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid var(--border); background:#0b1320; color:var(--muted); }
+
+    /* ✨ NEW: banner restore */
+    .banner{ margin-top:10px; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:#0b1422; display:flex; gap:10px; align-items:center; }
+  </style>
+</head>
+<body>
+<header>
+  <div class="container">
+    <h1>Penampil &amp; Editor Soal</h1>
+    <div class="muted">Klik langsung pada opsi untuk mengganti jawaban (mode Tunggal/Jamak). Autosave aktif — data aman saat refresh/close.</div>
+
+    <div class="toolbar">
+      <label class="btn">
+        <input id="fileInput" type="file" accept=".json,application/json" class="sr-only" />
+        📁 Pilih JSON
+      </label>
+      <!-- <button class="btn secondary" id="loadSample">Contoh dari berkas ini</button> -->
+
+      <label class="switch"><input id="toggleAll" type="checkbox" /><span>Tampilkan semua opsi</span></label>
+
+      <select id="filterCorrect" class="tinySel">
+        <option value="all">Semua status</option>
+        <option value="correct">Hanya Benar</option>
+        <option value="wrong">Hanya Salah</option>
+        <option value="unknown">Belum dinilai</option>
+      </select>
+
+      <div class="searchbar">🔎 <input id="searchBox" type="text" placeholder="Cari teks soal / opsi…" /></div>
+
+      <button class="btn" id="saveJson">💾 Simpan JSON</button>
+
+      <!-- ✨ NEW: kontrol autosave + hapus sesi -->
+      <label class="switch" title="Simpan otomatis ke browser">
+        <input id="toggleAutosave" type="checkbox" checked /> <span>Autosave</span> <!-- default ON -->
+      </label>
+      <button class="btn ghost" id="clearSession" title="Hapus data tersimpan di browser">🧹 Hapus sesi</button>
+    </div>
+
+    <!-- ✨ NEW: banner restore info -->
+    <div id="restoreBanner" class="banner" style="display:none">
+      <span>🔄 Melanjutkan sesi tersimpan <span id="restoreMeta" class="muted"></span></span>
+      <button class="btn" id="discardRestore">Buang</button>
+    </div>
+
+    <div class="count" id="countArea">0 soal</div>
+  </div>
+</header>
+
+<main class="container">
+  <section id="cards" class="grid"></section>
+</main>
+
+<footer>
+  Disimpan: <code>items[].selected</code>, <code>items[].isCorrect</code>, opsional <code>items[].reviewNote</code>. Autosave menggunakan <code>localStorage</code>. <!-- ✨ NEW -->
+</footer>
+
+<script>
+  const el = (s, root=document) => root.querySelector(s);
+  const els = (s, root=document) => Array.from(root.querySelectorAll(s));
+
+  const STORAGE_KEY = "quizEditor.session.v1";         // ✨ NEW
+  let autosaveTimer = null;                            // ✨ NEW
+
+  const state = {
+    raw: null,
+    flat: [],
+    showAllOptions: false,
+    qFilter: "",
+    filterCorrect: "all",
+    fileName: "kuis_diedit.json",
+    autoSave: true                                     // ✨ NEW
+  };
+
+  function flatten(data){
+    const out = [];
+    if(!data || !Array.isArray(data.pages)) return out;
+    data.pages.forEach((p, pi) => {
+      (p.items||[]).forEach((it, ii) => {
+        out.push({
+          pageIndex: p.pageIndex ?? pi,
+          itemIndex: ii,
+          question: it.question ?? "",
+          options: Array.isArray(it.options) ? it.options : [],
+          selected: Array.isArray(it.selected) ? it.selected : [],
+          url: p.url || null,
+          isCorrect: typeof it.isCorrect === "boolean" ? it.isCorrect : null,
+          reviewNote: it.reviewNote ?? "",
+          _multi: (Array.isArray(it.selected) && it.selected.length > 1) // default mode dari data
+        });
+      });
+    });
+    return out;
+  }
+
+  function setItemCorrect(pi, ii, val){
+    const idx = state.flat.findIndex(x => x.pageIndex===pi && x.itemIndex===ii);
+    if(idx>=0){ state.flat[idx].isCorrect = val; scheduleAutosave(); } // ✨ NEW
+  }
+  function setItemNote(pi, ii, note){
+    const idx = state.flat.findIndex(x => x.pageIndex===pi && x.itemIndex===ii);
+    if(idx>=0){ state.flat[idx].reviewNote = note; scheduleAutosave(); } // ✨ NEW
+  }
+  function setSelected(pi, ii, newArr){
+    const idx = state.flat.findIndex(x => x.pageIndex===pi && x.itemIndex===ii);
+    if(idx>=0){ state.flat[idx].selected = newArr; scheduleAutosave(); } // ✨ NEW
+  }
+  function setModeMulti(pi, ii, val){
+    const idx = state.flat.findIndex(x => x.pageIndex===pi && x.itemIndex===ii);
+    if(idx>=0){ state.flat[idx]._multi = !!val; scheduleAutosave(); } // ✨ NEW
+  }
+
+  function render(){
+    const cards = el("#cards");
+    cards.innerHTML = "";
+    let shown = 0;
+    const q = (state.qFilter || "").toLowerCase();
+
+    state.flat.forEach((it, idx) => {
+      const hay = (it.question + " " + it.options.map(o => o.text).join(" ")).toLowerCase();
+      if(q && !hay.includes(q)) return;
+      if(state.filterCorrect === "correct" && it.isCorrect !== true) return;
+      if(state.filterCorrect === "wrong" && it.isCorrect !== false) return;
+      if(state.filterCorrect === "unknown" && it.isCorrect !== null) return;
+
+      shown++;
+
+      const card = document.createElement("article");
+      card.className = "card";
+
+      const head = document.createElement("div");
+      head.className = "qhead";
+
+      const chips = document.createElement("div");
+      chips.className = "meta";
+      const chip1 = document.createElement("span");
+      chip1.className = "chip";
+      chip1.textContent = `#${idx+1}`;
+      chips.appendChild(chip1);
+
+      const chip2 = document.createElement("span");
+      chip2.className = "chip";
+      chip2.textContent = `Halaman ${it.pageIndex} • Item ${it.itemIndex}`;
+      chips.appendChild(chip2);
+
+      head.appendChild(chips);
+
+      // if(it.url){
+      //   const a = document.createElement("a");
+      //   a.href = it.url; a.target = "_blank"; a.rel = "noopener";
+      //   a.className = "btn ghost";
+      //   a.textContent = "Buka sumber ↗";
+      //   head.appendChild(a);
+      // }
+
+      card.appendChild(head);
+
+      const title = document.createElement("div");
+      title.className = "qtitle";
+      title.textContent = it.question || "(tanpa teks)";
+      card.appendChild(title);
+
+      // status bar
+      const statusBar = document.createElement("div");
+      statusBar.className = "statusBar";
+
+      const sel = document.createElement("select");
+      sel.innerHTML = `
+        <option value="unknown">— Pilih status —</option>
+        <option value="true">✅ Benar</option>
+        <option value="false">❌ Salah</option>
+      `;
+      sel.value = it.isCorrect === true ? "true" : it.isCorrect === false ? "false" : "unknown";
+      sel.addEventListener("change", () => {
+        const v = sel.value === "true" ? true : sel.value === "false" ? false : null;
+        setItemCorrect(it.pageIndex, it.itemIndex, v);
+        badge.className = "statusTag " + (v===true?"tagCorrect":v===false?"tagWrong":"tagUnknown");
+        badge.textContent = v===true ? "Tandai: Benar" : v===false ? "Tandai: Salah" : "Belum dinilai";
+      });
+      statusBar.appendChild(sel);
+
+      const badge = document.createElement("span");
+      const init = it.isCorrect;
+      badge.className = "statusTag " + (init===true?"tagCorrect":init===false?"tagWrong":"tagUnknown");
+      badge.textContent = init===true ? "Tandai: Benar" : init===false ? "Tandai: Salah" : "Belum dinilai";
+      statusBar.appendChild(badge);
+
+      const note = document.createElement("input");
+      note.type = "text";
+      note.placeholder = "Catatan (opsional)…";
+      note.value = it.reviewNote || "";
+      note.style.flex = "1";
+      note.style.minWidth = "160px";
+      note.addEventListener("input", () => setItemNote(it.pageIndex, it.itemIndex, note.value));
+      statusBar.appendChild(note);
+
+      const modeSel = document.createElement("select");
+      modeSel.className = "tinySel";
+      modeSel.innerHTML = `<option value="single">Tunggal</option><option value="multi">Jamak</option>`;
+      modeSel.value = it._multi ? "multi" : "single";
+      modeSel.title = "Mode pemilihan jawaban";
+      modeSel.addEventListener("change", () => {
+        const multi = modeSel.value === "multi";
+        setModeMulti(it.pageIndex, it.itemIndex, multi);
+        if(!multi){
+          const first = (it.selected||[])[0];
+          setSelected(it.pageIndex, it.itemIndex, first ? [first] : []);
+        }
+        render();
+      });
+      statusBar.appendChild(modeSel);
+
+      const hint = document.createElement("span");
+      hint.className = "pill";
+      hint.textContent = "Klik opsi untuk ganti jawaban";
+      statusBar.appendChild(hint);
+
+      card.appendChild(statusBar);
+
+      // opsi (click-to-select)
+      const selKeys = new Set((it.selected||[]).map(s => s.key ?? s.value ?? s.text));
+      const optsWrap = document.createElement("div");
+      optsWrap.className = "options";
+
+      const allOptions = it.options && it.options.length ? it.options : [];
+      const displayOptions = state.showAllOptions ? allOptions : allOptions.filter(o => selKeys.has(o.key ?? o.value ?? o.text));
+
+      if(displayOptions.length === 0 && allOptions.length > 0 && selKeys.size > 0){
+        const div = document.createElement("div");
+        div.className = "opt selected clickable";
+        div.innerHTML = `<span><span class="k">Terpilih:</span> ${Array.from(selKeys).join(", ")}</span><span class="badge">Jawaban</span>`;
+        div.title = "Nyalakan 'Tampilkan semua opsi' untuk mengganti ke opsi lain";
+        optsWrap.appendChild(div);
+      } else {
+        displayOptions.forEach(o => {
+          const idKey = (o.key ?? o.value ?? o.text);
+          const isSel = selKeys.has(idKey) || o.checked === true;
+          const opt = document.createElement("div");
+          opt.className = "opt clickable" + (isSel ? " selected" : "");
+          const left = document.createElement("div");
+          left.innerHTML = `<span class="k">${o.key ?? ""}</span> ${o.text ?? ""}`;
+          opt.appendChild(left);
+          if(isSel){
+            const badge2 = document.createElement("span");
+            badge2.className = "badge";
+            badge2.textContent = "Jawaban";
+            opt.appendChild(badge2);
+          }
+          opt.addEventListener("click", () => {
+            if(it._multi){
+              const now = new Set((it.selected||[]).map(s => s.key ?? s.value ?? s.text));
+              if(now.has(idKey)) now.delete(idKey); else now.add(idKey);
+              const arr = allOptions
+                .filter(op => now.has(op.key ?? op.value ?? op.text))
+                .map(op => ({ key: op.key ?? op.value ?? op.text, text: op.text ?? String(op.key ?? op.value ?? op.text) }));
+              setSelected(it.pageIndex, it.itemIndex, arr);
+            }else{
+              const selObj = { key: idKey, text: o.text ?? String(idKey) };
+              setSelected(it.pageIndex, it.itemIndex, [selObj]);
+            }
+            render();
+          });
+          optsWrap.appendChild(opt);
+        });
+      }
+      card.appendChild(optsWrap);
+
+      // details ringkas
+      const det = document.createElement("details");
+      const sum = document.createElement("summary"); sum.textContent = "Lihat data ringkas";
+      const pre = document.createElement("pre");
+      pre.style.whiteSpace = "pre-wrap"; pre.style.color = "var(--muted)";
+      pre.textContent = JSON.stringify({
+        question: it.question,
+        optionsCount: it.options?.length ?? 0,
+        selected: it.selected?.map(s => ({key: s.key ?? s.value ?? s.text, text: s.text})) ?? [],
+        isCorrect: it.isCorrect, reviewNote: it.reviewNote ?? ""
+      }, null, 2);
+      det.appendChild(sum); det.appendChild(pre); card.appendChild(det);
+
+      cards.appendChild(card);
+    });
+
+    const extra = state.qFilter? ` (hasil cari "${state.qFilter}")` : "";
+    const ftxt = state.filterCorrect==="all" ? "" :
+                 state.filterCorrect==="correct" ? " • filter: Benar" :
+                 state.filterCorrect==="wrong" ? " • filter: Salah" : " • filter: Belum dinilai";
+    el("#countArea").textContent = `${shown} soal ditampilkan${extra}${ftxt}`;
+  }
+
+  function loadFromObject(obj, fileNameHint){
+    state.raw = JSON.parse(JSON.stringify(obj));
+    state.flat = flatten(obj);
+    if(fileNameHint){ state.fileName = fileNameHint.replace(/\.[^.]+$/, "") + "_edited.json"; }
+    render();
+    scheduleAutosave(true); // ✨ NEW: simpan snapshot awal juga
+  }
+
+  // ✨ NEW: buildMerged -> digunakan autosave & saveJson
+  function buildMerged(){
+    if(!state.raw || !Array.isArray(state.raw.pages)) return null;
+    const edited = JSON.parse(JSON.stringify(state.raw));
+    const map = new Map();
+    state.flat.forEach(x => {
+      const key = `${x.pageIndex}::${x.itemIndex}`;
+      map.set(key, {
+        isCorrect: (x.isCorrect===true?true:x.isCorrect===false?false:null),
+        reviewNote: x.reviewNote ?? "",
+        selected: Array.isArray(x.selected) ? x.selected.map(s => ({
+          key: s.key ?? s.value ?? s.text,
+          text: s.text ?? String(s.key ?? s.value ?? s.text)
+        })) : []
+      });
+    });
+    edited.pages.forEach((p, pi) => {
+      (p.items||[]).forEach((it, ii) => {
+        const found = map.get(`${pi}::${ii}`);
+        if(found){
+          if(found.isCorrect === true || found.isCorrect === false){ it.isCorrect = found.isCorrect; } else { delete it.isCorrect; }
+          if(found.reviewNote && found.reviewNote.trim().length > 0){ it.reviewNote = found.reviewNote.trim(); } else { delete it.reviewNote; }
+          if(Array.isArray(found.selected)){ it.selected = found.selected; } else { delete it.selected; }
+        }
+      });
+    });
+    return edited;
+  }
+
+  // ✨ NEW: autosave (debounced)
+  function scheduleAutosave(immediate=false){
+    if(!state.autoSave) return;
+    if(immediate){
+      persistToLocalStorage();
+      return;
+    }
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(persistToLocalStorage, 500);
+  }
+
+  // ✨ NEW: persist / restore / clear
+  function persistToLocalStorage(){
+    try{
+      const merged = buildMerged();
+      if(!merged) return;
+      const payload = {
+        fileName: state.fileName,
+        savedAt: Date.now(),
+        data: merged
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      // optional: tampilkan timestamp di console
+      // console.log("Autosaved", new Date(payload.savedAt).toLocaleString());
+    }catch(err){
+      console.warn("Autosave gagal:", err);
+    }
+  }
+
+  function tryRestoreFromStorage(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(!raw) return;
+      const payload = JSON.parse(raw);
+      if(payload && payload.data && payload.data.pages){
+        loadFromObject(payload.data, payload.fileName || "autosave.json");
+        const t = new Date(payload.savedAt || Date.now());
+        el("#restoreMeta").textContent = `(${t.toLocaleString()})`;
+        el("#restoreBanner").style.display = "";
+      }
+    }catch(err){
+      console.warn("Restore gagal:", err);
+    }
+  }
+
+  function clearSession(){
+    localStorage.removeItem(STORAGE_KEY);
+    el("#restoreBanner").style.display = "none";
+  }
+
+  // Unduh JSON + simpan snapshot
+  function saveJson(){
+    if(!state.raw || !Array.isArray(state.raw.pages)){
+      alert("Tidak ada data untuk disimpan. Muat JSON terlebih dahulu.");
+      return;
+    }
+    const edited = buildMerged();
+    // simpan juga ke localStorage
+    persistToLocalStorage(); // ✨ NEW
+
+    const blob = new Blob([JSON.stringify(edited, null, 2)], {type: "application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = state.fileName || "kuis_diedit.json";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+  }
+
+  // events
+  el("#fileInput").addEventListener("change", async (e) => {
+    const file = e.target.files?.[0];
+    if(!file) return;
+    const text = await file.text();
+    try{
+      const obj = JSON.parse(text);
+      loadFromObject(obj, file.name);
+      window.scrollTo({top:0, behavior:"smooth"});
+    }catch(err){
+      alert("Gagal membaca JSON: " + err.message);
+    }
+  });
+
+  el("#toggleAll").addEventListener("change", (e) => {
+    state.showAllOptions = e.target.checked;
+    render();
+    scheduleAutosave(); // ✨ NEW (opsional, supaya preferensi ikut tersimpan di snapshot)
+  });
+
+  el("#searchBox").addEventListener("input", (e) => {
+    state.qFilter = e.target.value;
+    render();
+  });
+
+  el("#filterCorrect").addEventListener("change", (e) => {
+    state.filterCorrect = e.target.value;
+    render();
+    scheduleAutosave(); // ✨ NEW
+  });
+
+  el("#saveJson").addEventListener("click", saveJson);
+
+  el("#loadSample").addEventListener("click", async () => {
+    try{
+      const url = "moodle-quiz_attempt-3249597_Pra_UTS_page_80_of_80__CeLOE_LMS.json";
+      const res = await fetch(url);
+      if(!res.ok) throw new Error("Tidak bisa memuat contoh: " + res.status);
+      const obj = await res.json();
+      loadFromObject(obj, "moodle-quiz_attempt-3249597_Pra_UTS_page_80_of_80__CeLOE_LMS.json");
+    }catch(err){
+      alert("Gagal memuat contoh: " + err.message + "\n\nTip: gunakan tombol 'Pilih JSON'.");
+    }
+  });
+
+  window.addEventListener("keydown", (e) => {
+    const isInput = ["INPUT","TEXTAREA","SELECT"].includes(document.activeElement.tagName);
+    if(e.key === "/" && !isInput){ e.preventDefault(); el("#searchBox").focus(); }
+  });
+
+  // ✨ NEW: autosave toggler & clear session
+  el("#toggleAutosave").addEventListener("change", (e) => {
+    state.autoSave = e.target.checked;
+    if(state.autoSave) scheduleAutosave(true);
+  });
+  el("#clearSession").addEventListener("click", () => {
+    if(confirm("Hapus data sesi tersimpan di browser?")){ clearSession(); }
+  });
+  el("#discardRestore").addEventListener("click", () => {
+    clearSession();
+  });
+
+  // ✨ NEW: save saat akan keluar (best-effort)
+  window.addEventListener("beforeunload", () => {
+    if(state.autoSave) { try{ persistToLocalStorage(); }catch{} }
+  });
+
+  // ✨ NEW: coba restore sesi saat load
+  tryRestoreFromStorage();
+</script>
+</body>
+</html>
