@@ -527,6 +527,15 @@
 
   // ✨ NEW: coba restore sesi saat load
   tryRestoreFromStorage();
+
+  const TRUSTED = 'https://dwaynimay.github.io';
+
+  window.addEventListener('message', (ev) => {
+    if (ev.origin !== TRUSTED) return; // keamanan
+    if (ev.data && ev.data.type === 'LOAD_STORE' && typeof loadFromObject === 'function') {
+      try { loadFromObject(ev.data.payload, 'autoload.json'); } catch(e) { console.warn(e); }
+    }
+  });
 </script>
 </body>
 </html>
