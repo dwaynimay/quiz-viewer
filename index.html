@@ -67,6 +67,10 @@
     /* ✨ NEW: banner restore */
     .banner{ margin-top:10px; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:#0b1422; display:flex; gap:10px; align-items:center; }
   </style>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  
 </head>
 <body>
 <header>
@@ -79,9 +83,8 @@
         <input id="fileInput" type="file" accept=".json,application/json" class="sr-only" />
         📁 Pilih JSON
       </label>
-      <!-- <button class="btn secondary" id="loadSample">Contoh dari berkas ini</button> -->
 
-      <label class="switch"><input id="toggleAll" type="checkbox" /><span>Tampilkan semua opsi</span></label>
+      <label class="switch"><input id="toggleAll" type="checkbox" /><span>All Ops</span></label>
 
       <select id="filterCorrect" class="tinySel">
         <option value="all">Semua status</option>
@@ -89,10 +92,18 @@
         <option value="wrong">Hanya Salah</option>
         <option value="unknown">Belum dinilai</option>
       </select>
+      <select id="filterDuplicate" class="tinySel">
+        <option value="all">Semua soal</option>
+        <option value="dups">Hanya duplikat</option>
+        <option value="unique">Hanya unik</option>
+      </select>
 
       <div class="searchbar">🔎 <input id="searchBox" type="text" placeholder="Cari teks soal / opsi…" /></div>
 
-      <button class="btn" id="saveJson">💾 Simpan JSON</button>
+      <button class="btn" id="saveJson">Simpan JSON</button>
+      <button class="btn secondary" id="btnLoadFirebase">Load Firebase</button>
+      <button class="btn secondary" id="btnSaveFirebase">Save Firebase</button>
+      <button class="btn secondary" id="btnMergeSubmissions">Merge Submissions</button>
 
       <!-- ✨ NEW: kontrol autosave + hapus sesi -->
       <label class="switch" title="Simpan otomatis ke browser">
@@ -122,6 +133,32 @@
 <script>
   const el = (s, root=document) => root.querySelector(s);
   const els = (s, root=document) => Array.from(root.querySelectorAll(s));
+  const firebaseConfig = {
+      apiKey: "AIzaSyA1Fr_wqqnjJA5A70T5jJ0PQCpuewUldDg",
+      authDomain: "quizbank-28b45.firebaseapp.com",
+      projectId: "quizbank-28b45",
+      storageBucket: "quizbank-28b45.firebasestorage.app",
+      messagingSenderId: "15528485366",
+      appId: "1:15528485366:web:2fdc7c84178c04dc55a7d7",
+      measurementId: "G-MYMMV17J0Y"
+    };
+
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    auth.signInAnonymously()
+      .then(cred => {
+        console.log("Anon signed in:", cred.user.uid);
+      })
+      .catch(err => {
+        console.error("Anon login error:", err);
+      });
+
+    // koleksi & dokumen yang akan dipakai
+    const FIRESTORE_COLLECTION = "bankFiles";
+    const FIRESTORE_DOC_ID = "globalBank";
 
   const STORAGE_KEY = "quizEditor.session.v1";         // ✨ NEW
   let autosaveTimer = null;                            // ✨ NEW
@@ -133,7 +170,9 @@
     qFilter: "",
     filterCorrect: "all",
     fileName: "kuis_diedit.json",
-    autoSave: true                                     // ✨ NEW
+    autoSave: true,
+    // ✨ NEW
+    filterDuplicate: "all" // all | dups | unique
   };
 
   function flatten(data){
@@ -155,6 +194,36 @@
       });
     });
     return out;
+  }
+
+  // ✨ NEW: normalisasi teks soal untuk deteksi duplikat
+  function normalizeQuestion(text){
+    if(!text) return "";
+    return text
+      .toLowerCase()
+      .replace(/^\s*\d+\s*[\.\)]\s*/, "") // buang nomor di depan
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  // ✨ NEW: hitung grup duplikat & set metadata di state.flat
+  function recomputeDuplicates(){
+    const map = new Map(); // key: normalized → list index flat
+    state.flat.forEach((it, idx) => {
+      const key = normalizeQuestion(it.question);
+      it._normQ = key;
+      const arr = map.get(key) || [];
+      arr.push(idx);
+      map.set(key, arr);
+    });
+
+    state._dupGroups = map;
+
+    state.flat.forEach((it, idx) => {
+      const group = map.get(it._normQ) || [];
+      it._dupCount = group.length;   // berapa banyak dengan soal identik
+      it._dupIndex = group.indexOf(idx); // urutan dalam grup (0-based)
+    });
   }
 
   function setItemCorrect(pi, ii, val){
@@ -186,7 +255,13 @@
       if(state.filterCorrect === "correct" && it.isCorrect !== true) return;
       if(state.filterCorrect === "wrong" && it.isCorrect !== false) return;
       if(state.filterCorrect === "unknown" && it.isCorrect !== null) return;
-
+      // let dtxt = "";
+      // if(state.filterDuplicate === "dups") dtxt = " • hanya duplikat";
+      // if(state.filterDuplicate === "unique") dtxt = " • hanya unik";
+      // el("#countArea").textContent = `${shown} soal ditampilkan${extra}${ftxt}${dtxt}`;
+      const dupCount = it._dupCount || 0;
+      if(state.filterDuplicate === "dups" && dupCount < 2) return;
+      if(state.filterDuplicate === "unique" && dupCount >= 2) return;
       shown++;
 
       const card = document.createElement("article");
@@ -206,6 +281,13 @@
       chip2.className = "chip";
       chip2.textContent = `Halaman ${it.pageIndex} • Item ${it.itemIndex}`;
       chips.appendChild(chip2);
+
+      if(dupCount >= 2){
+        const chipDup = document.createElement("span");
+        chipDup.className = "chip";
+        chipDup.textContent = `Duplikat ${ (it._dupIndex ?? 0) + 1 } / ${dupCount }`;
+        chips.appendChild(chipDup);
+      }
 
       head.appendChild(chips);
 
@@ -278,6 +360,27 @@
       hint.className = "pill";
       hint.textContent = "Klik opsi untuk ganti jawaban";
       statusBar.appendChild(hint);
+
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "🗑 Hapus";
+      delBtn.style.padding = "4px 8px";
+      delBtn.style.fontSize = "11px";
+      delBtn.style.borderRadius = "999px";
+      delBtn.style.border = "1px solid var(--border)";
+      delBtn.style.background = "#1f2933";
+      delBtn.style.color = "var(--muted)";
+      delBtn.style.cursor = "pointer";
+
+      delBtn.addEventListener("click", () => {
+        if(!confirm("Hapus soal ini dari bank? (perlu simpan JSON / Firebase untuk permanen)")) return;
+        const idxFlat = state.flat.indexOf(it);
+        if(idxFlat >= 0){
+          state.flat.splice(idxFlat, 1);
+          recomputeDuplicates();   // hitung ulang grup duplikat
+          render();
+          scheduleAutosave();
+        }
+      });
 
       card.appendChild(statusBar);
 
@@ -355,10 +458,15 @@
   function loadFromObject(obj, fileNameHint){
     state.raw = JSON.parse(JSON.stringify(obj));
     state.flat = flatten(obj);
+
+    // ✨ NEW: hitung duplikat tiap kali load
+    recomputeDuplicates();
+
     if(fileNameHint){ state.fileName = fileNameHint.replace(/\.[^.]+$/, "") + "_edited.json"; }
     render();
-    scheduleAutosave(true); // ✨ NEW: simpan snapshot awal juga
+    scheduleAutosave(true);
   }
+
 
   // ✨ NEW: buildMerged -> digunakan autosave & saveJson
   function buildMerged(){
@@ -387,6 +495,154 @@
       });
     });
     return edited;
+  }
+
+  // ✨ Merge soal baru dari koleksi `submissions` ke bank saat ini
+  async function mergeFromSubmissions(limit = 50){
+    if(!db){
+      alert("Firebase DB belum siap.");
+      return;
+    }
+    if(!state.raw){
+      // kalau belum ada bank di memory, coba load dari Firebase dulu
+      const ok = confirm("Belum ada data di viewer. Mau load dari Firebase dulu?");
+      if(ok){
+        await loadFromFirebase();
+      } else {
+        alert("Silakan load bank soal dulu atau upload JSON sebelum merge.");
+        return;
+      }
+    }
+
+    try{
+      // 1) kumpulkan semua key soal yang SUDAH ada di bank master
+      const existingKeys = new Set(
+        state.flat.map(it => normalizeQuestion(it.question))
+      );
+
+      // 2) query submissions terbaru
+      const snap = await db
+        .collection("submissions")
+        .orderBy("createdAt", "desc")
+        .limit(limit)
+        .get();
+
+      if(snap.empty){
+        alert("Belum ada dokumen di koleksi 'submissions'.");
+        return;
+      }
+
+      let added = 0;
+
+      // 3) pastikan struktur pages di state.raw ada
+      if(!state.raw) state.raw = { pages: [] };
+      if(!Array.isArray(state.raw.pages)) state.raw.pages = [];
+
+      // opsional: pakai 1 page khusus untuk hasil merge
+      let mergePage = state.raw.pages.find(p => p._source === "submissionsMerge");
+      if(!mergePage){
+        mergePage = {
+          pageIndex: state.raw.pages.length,
+          items: [],
+          url: null,
+          _source: "submissionsMerge"
+        };
+        state.raw.pages.push(mergePage);
+      }
+
+      snap.forEach(doc => {
+        const sub = doc.data();
+        const store = sub.store;
+        if(!store || !Array.isArray(store.pages)) return;
+
+        store.pages.forEach((p, pi) => {
+          (p.items || []).forEach((it, ii) => {
+            const qText = it.question || "";
+            const key = normalizeQuestion(qText);
+            if(!qText) return;                 // soal kosong, skip
+            if(existingKeys.has(key)) return;  // sudah ada di bank, SKIP
+
+            // tandai bahwa ini soal baru
+            existingKeys.add(key);
+            added++;
+
+            // 4) tambahkan ke page merge di RAW (ini yang nanti disimpan)
+            mergePage.items.push({
+              question: it.question || "",
+              options: Array.isArray(it.options) ? it.options : [],
+              selected: Array.isArray(it.selected) ? it.selected.map(s => ({
+                key: s.key ?? s.value ?? s.text,
+                text: s.text ?? String(s.key ?? s.value ?? s.text)
+              })) : [],
+              isCorrect: (typeof it.isCorrect === "boolean") ? it.isCorrect : null,
+              reviewNote: it.reviewNote || "",
+              url: p.url || sub.url || null
+            });
+          });
+        });
+      });
+
+      // 5) rebuild flat dari RAW + render ulang
+      state.flat = flatten(state.raw);
+      // kalau kamu nanti punya recomputeDuplicates(), panggil di sini:
+      // recomputeDuplicates();
+
+      render();
+      scheduleAutosave(true);
+
+      alert(`Merge selesai.\nSoal baru yang ditambahkan ke bank: ${added}`);
+
+    }catch(err){
+      console.error("mergeFromSubmissions error:", err);
+      alert("Gagal merge dari submissions: " + err.message);
+    }
+  }
+
+  // === FIREBASE SAVE / LOAD ===
+  async function saveToFirebase(){
+    if(!state.raw || !Array.isArray(state.raw.pages)){
+      alert("Tidak ada data untuk disimpan. Muat JSON terlebih dahulu.");
+      return;
+    }
+    const edited = buildMerged();
+    if(!edited){
+      alert("Gagal membangun data edited.");
+      return;
+    }
+    try{
+      const docRef = db.collection(FIRESTORE_COLLECTION).doc(FIRESTORE_DOC_ID);
+      await docRef.set({
+        fileName: state.fileName,
+        updatedAt: Date.now(),
+        data: edited
+      });
+      alert("✅ Berhasil simpan ke Firebase.");
+    }catch(err){
+      console.error("Save Firebase error:", err);
+      alert("Gagal simpan ke Firebase: " + err.message);
+    }
+  }
+
+  async function loadFromFirebase(){
+    try{
+      const docRef = db.collection(FIRESTORE_COLLECTION).doc(FIRESTORE_DOC_ID);
+      const snap = await docRef.get();
+      if(!snap.exists){
+        alert("Belum ada data di Firebase (dokumen globalBank kosong).");
+        return;
+      }
+      const payload = snap.data();
+      if(!payload || !payload.data || !payload.data.pages){
+        alert("Data di Firebase tidak sesuai format viewer.");
+        return;
+      }
+      loadFromObject(payload.data, payload.fileName || "firebase.json");
+      window.scrollTo({top:0, behavior:"smooth"});
+      alert("☁️ Data dari Firebase berhasil dimuat.");
+    }catch(err){
+      console.error("Load Firebase error:", err);
+      alert("Gagal load dari Firebase: " + err.message);
+    }
   }
 
   // ✨ NEW: autosave (debounced)
@@ -488,19 +744,20 @@
     render();
     scheduleAutosave(); // ✨ NEW
   });
+  el("#filterDuplicate").addEventListener("change", (e) => {
+  state.filterDuplicate = e.target.value;
+  render();
+});
 
   el("#saveJson").addEventListener("click", saveJson);
-
-  el("#loadSample").addEventListener("click", async () => {
-    try{
-      const url = "moodle-quiz_attempt-3249597_Pra_UTS_page_80_of_80__CeLOE_LMS.json";
-      const res = await fetch(url);
-      if(!res.ok) throw new Error("Tidak bisa memuat contoh: " + res.status);
-      const obj = await res.json();
-      loadFromObject(obj, "moodle-quiz_attempt-3249597_Pra_UTS_page_80_of_80__CeLOE_LMS.json");
-    }catch(err){
-      alert("Gagal memuat contoh: " + err.message + "\n\nTip: gunakan tombol 'Pilih JSON'.");
-    }
+  el("#btnSaveFirebase").addEventListener("click", () => {
+    saveToFirebase();
+  });
+  el("#btnLoadFirebase").addEventListener("click", () => {
+    loadFromFirebase();
+  });
+  el("#btnMergeSubmissions").addEventListener("click", () => {
+    mergeFromSubmissions(50); // default ambil 50 dokumen submissions terbaru
   });
 
   window.addEventListener("keydown", (e) => {
